@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: {{ CONTAINER_NAME }}
+  name: {{ CONTAINER_NAME }}-svc
+  namespace: prod
+spec:
+  type: LoadBalancer
+  selector:
+    app: {{ CONTAINER_NAME }}
+  ports:
+  - name: http
+    protocol: TCP
+    port: 3000
+    #nodePort: 30001
+    targetPort: 3000

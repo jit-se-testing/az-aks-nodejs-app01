@@ -1,0 +1,48 @@
+name: Bootstrap Terraform Backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to perform (apply/destroy)'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - apply
+          - destroy
+      confirm_destroy:
+        description: 'Type YES to confirm destroy (required for destroy action)'
+        required: false
+        default: ''
+
+jobs:
+  bootstrap-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Terraform Init
+        working-directory: JIT/jit-se-testing/az-aks-nodejs-app01/aks/backend-bootstrap
+        run: terraform init
+      - name: Terraform Apply
+        if: github.event.inputs.action == 'apply'
+        working-directory: JIT/jit-se-testing/az-aks-nodejs-app01/aks/backend-bootstrap
+        run: terraform apply -auto-approve
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy' && github.event.inputs.confirm_destroy == 'YES'
+        working-directory: JIT/jit-se-testing/az-aks-nodejs-app01/aks/backend-bootstrap
+        run: |
+          echo 'WARNING: You are about to destroy backend resources!'
+          terraform destroy -auto-approve
+      - name: Destroy Not Confirmed
+        if: github.event.inputs.action == 'destroy' && github.event.inputs.confirm_destroy != 'YES'
+        run: |
+          echo 'Destroy action was requested, but confirmation was not provided. Skipping destroy.'
+          exit 1 

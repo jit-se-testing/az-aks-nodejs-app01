@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ CONTAINER_NAME }}
+  namespace: prod
+  labels:
+    app: {{ CONTAINER_NAME }}
+    env: prod
+spec:
+  selector:
+    matchLabels:
+      app: {{ CONTAINER_NAME }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 3
+      maxUnavailable: 1
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: {{ CONTAINER_NAME }}
+    spec:
+      containers:
+      - name: {{ CONTAINER_NAME }}
+        image: {{ IMAGE_CONTAINER }}
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 3000
+      imagePullSecrets:
+      - name: github-aquasaemea-dockerhub

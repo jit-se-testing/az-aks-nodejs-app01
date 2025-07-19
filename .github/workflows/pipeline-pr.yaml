@@ -1,0 +1,95 @@
+name: Build and Deploy container to AKS
+on:
+  pull_request:
+    branches: 
+      - main
+      # comment5
+      
+env:
+   ACR_NAME: jitsetestingacr01 
+   ACR_USERNAME: jitsetestingacr01
+   IMAGE_NAME: az-aks-nodejs-app01
+   IMAGE_TAG: ${{ github.sha }}
+   CONTAINER_NAME: az-aks-nodejs-app01 #<name + first letter of your last name> e.g andresg-app
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set Azure subscription
+        run: |
+          az account set --subscription $AZURE_SUBSCRIPTION_ID
+
+      - name: Login to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: $ACR_NAME.azurecr.io
+          username: $ACR_USERNAME
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Install Dependencies & Jit CLI
+        run: |
+          sudo apt-get update && sudo apt-get install -y curl git
+          curl -L https://jit-cli.s3.us-east-1.amazonaws.com/jit-cli/latest/jit-cli-amd64-slim -o jit-cli
+          chmod +x jit-cli
+
+      - name: Run Jit CLI Scan
+        env:
+          # Data relevant for creating a PR reivew
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COMMIT_ID: ${{ github.event.pull_request.head.sha }}
+          # Needed for communicating Jit BE
+          JIT_CLIENT_ID: ${{ secrets.JIT_CLIENT_ID }}
+          JIT_SECRET_KEY: ${{ secrets.JIT_SECRET_KEY }}
+        run: |
+          ./jit-cli container \
+            --image $ACR_NAME.azurecr.io/$IMAGE_NAME:$IMAGE_TAG \
+            --tracking-name $DOCKER_REPOSITORY/$IMAGE_NAME \
+            --organization "$GITHUB_REPOSITORY_OWNER" \
+            --repo "${GITHUB_REPOSITORY#*/}" \
+            --pull-request "${PR_NUMBER}" \
+            --commit-id "${COMMIT_ID}" \
+            --add-to-backlog \
+            --fail-on-findings \
+            --new-findings-only    
+
+      - name: Build, tag, and push image to Azure Container Registry
+        run: |
+          # Build and push the image
+          docker login $ACR_NAME.azurecr.io -u $ACR_USERNAME -p ${{ secrets.ACR_PASSWORD }}
+          docker build -t $ACR_NAME.azurecr.io/$IMAGE_NAME:$IMAGE_TAG -t $ACR_NAME.azurecr.io/$IMAGE_NAME:latest ./app
+          docker push $ACR_NAME.azurecr.io/$IMAGE_NAME:$IMAGE_TAG
+          docker push $ACR_NAME.azurecr.io/$IMAGE_NAME:latest
+  deploy_dev:
+    needs: build
+    runs-on: ubuntu-latest   
+    steps:   
+      - name: Checkout code
+        uses: actions/checkout@v3
+         
+      - name: Setting K8s context
+        uses: azure/k8s-set-context@v3
+        with:
+           method: kubeconfig
+           kubeconfig: ${{ secrets.KUBECONFIG_AKS01 }}
+           context: jit-se-testing-aks01
+                     
+      - name: Deploying to Dev
+        run: |
+          export IMAGE_CONTAINER="$ACR_NAME.azurecr.io/$IMAGE_NAME:$IMAGE_TAG"
+          
+          sed -e "s#{{ IMAGE_CONTAINER }}#$IMAGE_CONTAINER#g" -e "s#{{ CONTAINER_NAME }}#$CONTAINER_NAME#g" "./manifests/dev/deployment.yaml" |
+          kubectl apply -f -
+    
+          sed -e "s#{{ CONTAINER_NAME }}#$CONTAINER_NAME#g" "./manifests/dev/service.yaml" |
+          kubectl apply -f -
